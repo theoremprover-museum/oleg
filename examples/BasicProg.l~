@@ -1,0 +1,510 @@
+(***** Prelude **************************************************************)
+
+[SET=Type(0)]
+[TYPE=Type];
+[TYPE_minus1 : TYPE =Type]
+[TYPE_minus2 : TYPE_minus1 =Type];
+
+
+$[Target : {A|Type}A->Type]
+$[on : {A|Type}{a:A}Target a];
+Label (!Target!) Target;
+Label (!Target on!) on;
+
+
+(***** JM Equality **********************************************************)
+
+$[op== : {A,B|Type}A->B->Prop // JMr];
+Configure Infix == right 2;
+
+$[JMr : {A|Type}{x:A}x == x];
+
+$[JM_elim : {A|Type}{a:A}{P:{b:A}(a == b)->Type}(P a (JMr a))->
+		{b:A}{q:a == b}{tg:Target q}P b q];
+
+[[A:Type][a,b:A][P:{b:A}(a == b)->Type][p:P a (JMr a)][tg:Target (JMr a)]
+  JM_elim a P p a (JMr a) tg ==> p
+];
+
+Label (!JM!) op==;
+Label (!JM refl!) JMr;
+Label (!JM elim!) JM_elim;
+
+Goal JM_J : {A|Type}{a,b|A}{q:a == b}{tg:Target q}
+            {Phi:A->Type}{phi:Phi a}Phi b;
+Elim (!JM elim!) q;
+  intros; Immed;
+Save;
+Label (!JM J!) JM_J;
+
+Goal JM_Jsym : {A|Type}{b,a|A}{q:b == a}{tg:Target q}
+               {Phi:A->Type}{phi:Phi a}Phi b;
+Elim (!JM elim!) q;
+  intros; Immed;
+Save;
+Label (!JM Jsym!) JM_Jsym;
+
+Goal JM_K : {A|Type}{a|A}{q:a == a}{tg:Target q}
+            {Phi:(a == a)->Type}{phi:Phi (JMr a)}Phi q;
+Elim (!JM elim!) q;
+  intros; Immed;
+Save;
+Label (!JM K!) JM_K;
+
+
+(***** M-L Equality (needed for Theorems) ***********************************)
+
+$[Eq : {t|Type}t->t->Prop // Eqr];
+
+$[Eqr : {t|Type}{x:t}Eq x x];
+
+$[Eq_elim : {t|Type}{P:{x,y:t}(Eq x y)->Type}({x:t}P x x (Eqr x))->
+		{x,y:t}{p:Eq x y}P x y p];
+
+[[t:Type]
+ [P:{x,y:t}(Eq x y)->Type]
+ [h:{x:t}P x x (Eqr x)]
+ [x:t]
+    Eq_elim P h x x (Eqr x) ==> h x];
+
+
+Goal Eq_refl : {T|Type}{t:T}Eq t t;
+	intros;
+	Refine Eqr;
+SaveUnfrozen Eq_refl;		(* otherwise Eq_unique can't be proven *)
+
+Goal Eq_subst : {t|Type}{m,n|t}(Eq m n)->{P:t->Type}(P m)->P n;
+        Intros ___;
+        Refine Eq_elim|t ([x,y:t][_:Eq x y]{P:t->Type}(P x)->P y);
+        Intros ___;
+        Immed;
+Save Eq_subst;
+
+Label (!Eq!) Eq;
+Label (!Eq refl!) Eq_refl;
+Label (!Eq elim!) Eq_elim;
+Label (!Eq subst!) Eq_subst;
+
+Generate (!Eq sym!);
+
+[trueProp = {P:Prop}P->P];
+[trueProof = [P:Prop][p:P]p : trueProp];
+
+Label (!any inhabited type!) trueProp;
+Label (!any inhabited type term!) trueProof;
+
+
+(***** Some Datatypes ******************************************************)
+
+Inductive [empty : Type] Constructors;
+Inductive [unit  : Type] Constructors [void : unit];
+Inductive [bool  : Type] Constructors [true : bool][false : bool];
+Generate (!bool cases!);
+
+Inductive [nat : Type] Constructors
+  [zero : nat]
+  [suc  : {n:nat}nat];
+Generate (!nat cases!);
+Generate (!nat eduardo!);
+
+[A?Type];
+Inductive [list:Type] Constructors
+  [nil:list]
+  [op:: : {x:A}{xs:list}list];
+Generate (!list cases!);
+Generate (!list eduardo!);
+Discharge A;
+Configure Infix :: right 4;
+
+(***** Simple Examples *****************************************************)
+
+(* + *)
+
+Configure Infix + right 4;
+
+Goal nat->nat->nat;
+Program op+ x y;
+  Program Elim (!nat elim!) x;
+    Program Refine y;
+    Program Refine suc (n + y);
+Program Save;
+
+
+(* fib *)
+
+Goal nat->nat;
+Program fib n;
+  Program Elim (!nat eduardo!) n;
+    Program Elim (!nat cases!) z;
+      Program Refine zero;
+      Program Elim (!nat cases!) n;
+        Program Refine suc zero;
+        Program Refine (fib n) + (fib (suc n));
+Program Save;
+
+
+(* le *)
+
+Configure Infix &le left 3;
+
+Goal nat->nat->bool;
+Program op&le x y;
+  Program Elim (!nat eduardo!) x;
+    Program Elim (!nat cases!) z;
+      Program Refine true;
+      Program Elim (!nat cases!) y;
+        Program Refine false;
+        Program Names y x;
+          Program Refine x &le y;
+Program Save;
+
+
+(* eq *)
+
+Configure Infix &eq left 3;
+
+Goal nat->nat->bool;
+Program op&eq x y;
+  Program Elim (!nat eduardo!) x;
+    Program Elim (!nat cases!) z;
+      Program Elim (!nat cases!) y;
+        Program Refine true;
+        Program Refine false;
+      Program Elim (!nat cases!) y;
+        Program Refine false;
+        Program Names y x;
+          Program Refine x &eq y;
+Program Save;
+
+
+(***** Berry's example rephrased *******************************************)
+
+Goal bool->bool->bool->bool;
+Program majority x y z;
+  Program Elim (!bool cases!) x;
+    Program Elim (!bool cases!) y;
+      Program Refine true;
+      Program Refine z;
+    Program Elim (!bool cases!) y;
+      Program Refine z;
+      Program Refine false;
+Program Save;
+
+
+(***** The decision tree can acquire more information **********************)
+
+Goal nat->(list nat)->bool;
+Program member n xs;
+  Program Elim (!list eduardo!) xs;
+    Program Elim (!list cases!) z;
+      Program Refine false;
+      Program Abst member2 n x xs (b as n &eq x);
+        Program Elim (!bool cases!) b;
+          Program Refine true;
+          Program Refine member n xs;
+Program Save;
+
+
+(***** Some Inductive Families *********************************************)
+
+Inductive [so : bool -> Type] Constructors
+  [oh : so true];
+Generate (!so cases!);
+
+[A?Type];
+Inductive [vect:nat->Type] Constructors
+  [vnil:vect zero]
+  [vcons:{n|nat}{x:A}{xs:vect n}vect (suc n)];
+Generate (!vect cases!);
+Generate (!vect eduardo!);
+Discharge A;
+
+Goal {n|nat}{xs,ys:vect nat n}vect nat n;
+Program vplus n xs ys;
+  Program Elim (!vect elim!) xs;
+    Program Elim (!vect cases!) ys;
+      Program Refine vnil;
+    Program Elim (!vect cases!) ys;
+      Program Names n y ys x xs ;
+        Program Refine vcons (x + y) (vplus xs ys);
+Program Save;
+
+
+
+(* and sigma types *)
+
+[A|Type][B:A->Type];
+Inductive [ex : Type] Constructors
+  [wit:{a:A}{b:B a}ex];
+Discharge A;
+Generate (!ex cases!);
+
+
+(****** No Confusion Theorems ***********************************************)
+
+[Absurd = {T:Type}T];
+
+Goal {x,y:nat}Type;
+Program natNoConfStmt x y;
+  Program Elim (!nat cases!) x;
+    Program Elim (!nat cases!) y;
+      Program Refine {Phi:Type}Phi->Phi;
+      Program Refine Absurd;
+    Program Elim (!nat cases!) y;
+      Program Refine Absurd;
+      Program Names y x;
+        Program Refine {Phi:Type}((x == y)->Phi)->Phi;
+Program Save;
+ 
+Goal {x,y:nat}{q:x == y}{tg:Target q}natNoConfStmt x y;
+Program natNoConf x y q tg;
+  Program Elim (!JM elim!) q;
+    Program Elim (!nat cases!) x;
+      Program Refine [Phi:Type][phi:Phi]phi;
+      Program Refine [Phi:Type][phi:(n == n)->Phi]phi (JMr n);
+Program Save;  
+
+Label (!nat noConf!) natNoConf;
+
+Goal {x,y:bool}Type;
+Program boolNoConfStmt x y;
+  Program Elim (!bool cases!) x;
+    Program Elim (!bool cases!) y;
+      Program Refine {Phi:Type}Phi->Phi;
+      Program Refine Absurd;
+    Program Elim (!bool cases!) y;
+      Program Refine Absurd;
+      Program Names y x;
+        Program Refine {Phi:Type}Phi->Phi;
+Program Save;
+
+Goal {x,y:bool}{q:x == y}{tg:Target q}boolNoConfStmt x y;
+Program boolNoConf x y q tg;
+  Program Elim (!JM elim!) q;
+    Program Elim (!bool cases!) x;
+      Program Refine [Phi:Type][phi:Phi]phi;
+      Program Refine [Phi:Type][phi:Phi]phi;
+Program Save;
+
+Label (!bool noConf!) boolNoConf;
+
+
+(***** a classic ************************************************************)
+
+Goal {A|Type}{n:nat}{xs:vect A (suc n)}vect A n;
+Program vtail A n xs;
+  Program Elim (!vect cases!) xs;
+    Program Refine xs;
+Program Save;
+
+(***** where it pays to pull stuff to the left ******************************)
+
+Goal {A|Type}nat->(list (ex [n:nat]A))->bool;
+Program occ A y xas;
+  Program Elim (!list elim!) xas;
+    Program Refine false;
+    Program Elim (!ex cases!) x;
+    Program Abst occ2 y a b xs (q as a &eq y);
+      Program Elim (!bool cases!) q;
+        Program Refine true;
+        Program Refine occ y xs;
+Program Save;
+
+Goal {A|Type}{n:nat}{xas:list (ex [n:nat]A)}(so (occ n xas))->A;
+Program Proj A n xas pf;
+  Program Elim (!list elim!) xas;
+    Program Elim (!so cases!) pf;
+    Program Elim (!ex cases!) x;
+      Program Abst Proj2|A n a b xs (q as a &eq n) pf;
+        Program Elim (!bool cases!) q;
+          Program Refine b;
+          Program Refine Proj n xs pf;
+Program Save;
+
+
+
+
+(***** spare stuff *********************************************************)
+
+Inductive [Compare:{x,y:nat}Type] Constructors
+  [CompLess : {x,y:nat}Compare x (x + (suc y))]
+  [CompEq : {x:nat}Compare x x]
+  [CompMore : {x,y:nat}Compare (y + (suc x)) y];
+Generate (!Compare cases!);
+
+Goal {x,y:nat}Compare x y;
+Program compare x y;
+  Program Elim (!nat elim!) x;
+    Program Elim (!nat cases!) y;
+      Program Refine CompEq zero;
+      Program Refine CompLess zero n;
+    Program Elim (!nat cases!) y;
+      Program Refine CompMore n zero;
+      Program Names y x;
+        Program Abst compSuc x y (c as compare x y);
+          Program Elim Compare_elim c;
+            Program Refine CompLess (suc x) y;
+            Program Refine CompEq (suc x);
+            Program Refine CompMore x (suc y);
+Program Save;
+
+
+Configure Infix &lt left 3;
+Goal nat->nat->nat;
+Program max x y;
+  Program Abst max2 x y (c as compare x y);
+    Program Elim (!Compare cases!) c;
+      Program Refine x + (suc y);
+      Program Refine x;
+      Program Refine y + (suc x);
+Program Save;
+
+Inductive [PNat : nat -> Type] Constructors
+  [mkPNat : {n:nat}{pn:{x,y|nat}{q:n == suc (x + y)}PNat y}PNat n];
+
+Goal {n:nat}{x,y:nat}(n == suc (x + y))->PNat y;
+Program pNatHelp n x y q;
+  Program Elim (!nat elim!) n;
+    Program Elim (!nat cases!) x;
+      Program Refine mkPNat y ([x,z|nat][q:y == suc (x + z)]
+                              pNatHelp y x z q);
+      Program Refine pNatHelp (suc (n + y)) n y JMr;
+Program Save;
+
+Goal {n:nat}PNat n;
+Program pNat n; 
+  Program Refine mkPNat n ([x,y|nat]pNatHelp n x y);
+Program Save;
+
+Goal natPlusRec : {n:nat}{P:nat->Type}
+                  {p:{n:nat}{pn:{x,y|nat}{q:n == suc (x + y)}P y}P n}P n;
+intros n' P p; Abst n n';
+  Abst pn (pNat n);
+    Elim (!PNat elim!) pn;
+      intros;
+        Refine p;
+          Immed;
+Save;
+
+
+Goal nat -> nat -> nat;
+Program hcf x y;
+  Program Elim natPlusRec x;
+    Program Elim natPlusRec y;
+      Program Names y x;
+        Program Abst hcf2 x y (cxy as compare x y);
+          Program Elim (!Compare cases!) cxy;
+            Program Elim (!nat cases!) x;
+              Program Refine (suc y);
+(*              Program Refine hcf (suc n) (suc y); *)
+(* instead *)   Intros x y yh xh;
+                  Refine ret_hcf2; Refine call_hcf;
+                    Refine -0 yh JMr;
+                      Immed;
+            Next 15; Program Refine x;
+            Program Elim (!nat cases!) y;
+              Program Refine (suc x);
+(*              Program Refine hcf (suc x) (suc n); *)
+(* instead *)   Intros y x yh xh;
+                  Refine ret_hcf2; Refine call_hcf|(suc x)|(suc y);
+                    Refine -0 xh JMr;
+Program;
+Program Save;
+
+
+
+
+  Program Abst gcd2 x y (pnx as pNat x) (pny as pNat y) (cxy as compare x y);
+    Program Elim PNat_elim pnx;
+      Program Elim PNat_elim pny;
+        Program Names y pny x pnx;;
+          Program Elim Compare_elim cxy;
+            Program Elim (!nat cases!) x;
+              Program Refine suc y;
+              Program Refine gcd (suc n) (suc y);
+            Next +1; Program;
+              Program Refine x;
+            Next +1; Program;
+              Program Elim (!nat cases!) y;
+                Program Refine (suc x);
+                Program Refine gcd (suc x) (suc n);
+
+(* yuck *)
+
+
+[GCD = [x,y:nat]nat];
+
+Goal {x,y:nat}GCD x y;
+Freeze GCD;
+  Abst pnx (pNat x);
+    Elim (!PNat elim!) pnx;
+      Abst pny (pNat y);
+        Elim (!PNat elim!) pny;
+          Names y pny pnyh x pnx pnxh;
+            Abst cxy (compare x y);
+              Elim (!Compare elim!) cxy;
+                Elim (!nat cases!) x;
+Unfreeze GCD;
+                  intros; Refine (suc y);
+                  intros x y pnx pnxh pny pnyh;
+                    Refine pnxh JMr;
+                      Immed;
+                  intros; Refine x;
+                Elim (!nat cases!) y;
+                  intros; Refine (suc x);
+                  intros y x pny pnyh pnx pnxh;
+                    Refine pnxh JMr;
+                      Refine (suc y);
+Save gcd;
+
+Label (!nat zero!) zero;
+Label (!nat suc!) suc;
+
+(Normal (gcd (!42!) (!35!)));
+
+
+
+(****************************************************************************)
+
+Inductive [Word : bool->nat->Type] Constructors
+  [W0  : {n:nat}Word false n]
+  [Wnz : {n|nat}{nz:Word true n}Word false n]
+  [NZW1 : Word true zero]
+  [NZW0nz : {n|nat}{nz:Word true n}Word true (suc n)]
+  [NZWnzw : {n|nat}{nz:Word true n}{w:Word false n}Word true (suc n)];
+Generate (!Word cases!);
+Generate (!Word eduardo!);
+
+Goal {n:nat}Word true n;
+Program NZW01 n;
+  Program Elim (!nat elim!) n;
+    Program Refine NZW1;
+    Program Refine NZW0nz (NZW01 n);
+Program Save;
+
+[A?Type];
+Inductive [maybe : Type] Constructors
+  [yes:A->maybe]
+  [no:maybe];
+Generate (!maybe cases!);
+Discharge A;
+
+Goal {n|nat}(Word false n)->maybe (Word true n);
+Program INC n w;
+  Program Elim (!nat eduardo!) n;
+    Program Elim (!Word cases!) w;
+      Program Refine yes (NZW01 n);
+      Program Elim (!Word cases!) nz;
+        Program Refine no (Word true zero);
+        Program Abst INC2 nz (mnz as (INC (Wnz nz)));
+          Program Elim (!maybe cases!) mnz;
+            Program Refine yes (NZW0nz x1);
+            Program Refine yes (NZWnzw (NZW01 n) (W0 n));
+        Program Abst INC3 nz w (INC w);
+          Program Elim (!maybe cases!) abst;
+            Program Refine yes (NZWnzw nz (Wnz x1));
+            Program Abst INC4 nz w (mnz as (INC (Wnz nz)));
+              Program Elim (!maybe cases!) mnz;
+                Program Refine yes (NZWnzw x1 (W0 n));
+                Program Refine no (Word true (suc n));
+Program Save;

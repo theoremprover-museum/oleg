@@ -1,0 +1,823 @@
+(**********************************************************************)
+(**********                                                  **********)
+(**********          OLEG Programming Tactics                **********)
+(**********                                                  **********)
+(**********************************************************************)
+
+fun makeProgDefs (DA,DT) name i =
+    let val (LDA,(zap,paz)) = copyCtxt ldify DA
+        val LDT = zap %>> DT
+        val Tname = "T_"^name
+        val Uname = "U_"^name
+        val Cname = "call_"^name
+        val Rname = "ret_"^name
+        val typeF = $!(LDA,LDT)
+        val typeFb = noo ((Let,Def),Tname) ("F",i) ([],typeF)
+        val typeFb = typeFb <-
+                     let val ref (Bd {bd=bd,deps=deps,frz=frz,ts=ts,
+                                      param=param,kind=kind}) = typeFb
+                     in  Bd {bd=bd,deps=[Cname,Rname,Uname],frz=frz,ts=ts,
+                                 param=param,kind=kind}
+                     end
+        val (aa,vv) = ArgsAndVis iota DA
+        val unitF = $!(LDA,Supply ["any","inhabited","type"])
+        val unitFb = noo ((Let,Def),Uname) ("U",i) ([],unitF)
+        val hvv' = (map (const NoShow) vv)@[ShowNorm]
+        val Faa = MkApp ((Ref typeFb,aa),vv)
+        local
+            val (HDA,(hzap,hpaz)) = copyCtxt hide DA
+            val HFaa = hzap %>> Faa
+            val HDT = hzap %>> DT
+        in  val callFT = $!(HDA,Bind ((Pi,Vis),"",HFaa,HDT))
+            val retFT = $!(HDA,Bind ((Pi,Vis),"",HDT,HFaa))
+        end
+        val idfn = let val (HLDA,(hlzap,hlpaz)) = copyCtxt hide LDA
+                   in  $!(HLDA,Bind ((Lda,Vis),"val",hlzap %>> LDT,Rel 1))
+                   end
+        val callb = noo ((Let,Def),"call_"^name) ("call",i) ([],idfn)
+        val retb = noo ((Let,Def),"ret_"^name) ("ret",i) ([],idfn)
+        fun retype b t = let val (bv,nam,v,_) = ref_bd b
+                         in  b <: (bv,nam,v,t)
+                         end
+        val _ = retype callb callFT
+        val _ = retype retb retFT
+        val _ = (ref_frz retb) := Froz
+        val _ = (ref_frz callb) := Froz
+        val _ = (ref_frz typeFb) := Froz
+        val _ = (ref_frz unitFb) := Froz
+    in  (retb,callb,unitFb,typeFb)
+    end
+
+fun progFrame (DA,DT) name i =
+    let val (retb,callb,unitFb,typeFb) = makeProgDefs (DA,DT) name i
+        val (LDA,(zap,paz)) = copyCtxt ldify DA
+        val LDT = zap %>> DT
+        val (aa,vv) = ArgsAndVis iota DA
+        val hvv' = (map (const NoShow) vv)@[ShowNorm]
+        val JM = Supply ["JM"]
+        val qvv = [NoShow,NoShow,ShowNorm,ShowNorm]
+        val TY = %"Type"
+        val mainb = let val (PDA,(pzap,ppaz)) = copyCtxt iota DA
+                    in  noo ((Sig,Vis),name) ("f",i) (PDA,pzap %>> DT)
+                    end
+        val goalb = let val (PDA,(pzap,ppaz)) = copyCtxt iota DA
+                        val (aa,vv) = ArgsAndVis iota PDA
+                    in  noo (HoleBV,"_"^name) ("g",i)
+                            (PDA,MkApp ((Ref typeFb,aa),vv))
+                    end
+        val cfaa = MkApp ((Ref callb,
+                           aa@[MkApp ((Ref goalb,aa),vv)]),hvv')
+        val clueb =
+          noo (HoleBV,"clueb") ("clue",i)
+                    ([mainb],MkApp ((JM,[
+                     ref_typ mainb,ref_typ mainb,
+                     Ref mainb,
+                     $!(LDA,zap %>> cfaa)]),qvv))
+        val unitb =
+            let val (PDA,(pzap,ppaz)) = copyCtxt iota DA
+                val (aa,vv) = ArgsAndVis iota PDA
+                val PDT = pzap %>> DT
+            in  noo (HoleBV,"_"^name) ("q",i)
+                    (PDA,MkApp ((Ref unitFb,aa),vv))
+            end
+     in  ([unitb,clueb,goalb,retb,callb,unitFb,typeFb],
+          App ((Bot,[Proj (Fst,Ref clueb)]),[ShowNorm]))
+    end
+
+fun legoGoalName () = fst (!Toplevel.TLNAME)
+fun thud () = failwith "not a programming problem"
+type declRecord = {fName : string,
+                   fType : cnstr,
+                   fTerm : cnstr,
+                   fVv   : prntVisSort list,
+                   fFake : binding,
+                   fTucr  : binding*binding*binding*binding}
+
+type declsType = (int * declRecord) list
+
+local
+    fun visUnder (Bind ((_,v),_,_,r)) = ((cons v)**iota) (visUnder r)
+      | visUnder x = ([],x)
+
+    exception NotDecl
+
+    fun head t = (case parseApp t of (Ref b,_,_) => b | _ => raise NotDecl)
+
+    fun ct2tb (Bind (_,_,_,r as Bind _)) = ct2tb r
+      | ct2tb (Bind (_,_,d,_)) = head d
+      | ct2tb _ = raise NotDecl
+
+in
+
+fun findDecls gs =
+    let val JMb = unRef (Supply ["JM"])
+        fun chkJM b = if sameRef JMb b then () else raise NotDecl
+        fun findDecls [] = []
+          | findDecls ((gn,Bind ((Sig,Vis),fname,fT,
+                       App ((Ref jmb,[_,_,Rel 1,rhs]),_)))::gs) =
+           (let val _ = chkJM jmb
+                val (vv,RT) = visUnder rhs
+                val cb = head RT
+                val tb = ct2tb (ref_typ cb)
+                val fakeb = noo ((Lda,Vis),fname) ("f",gn) ([],fT)
+                val fakeb = fakeb <! Bnd
+                val (rnam,unam) = case ref_deps tb
+                                    of [_,rnam,unam] => (rnam,unam)
+                                     | _ => raise NotDecl
+                val rb = unRef (#1 (fEval (Ref_c rnam)))
+                val ub = unRef (#1 (fEval (Ref_c unam)))
+            in  cons (gn,({fName = fname,
+                           fType = fT,
+                           fTerm = rhs,
+                           fVv   = map prVis vv,
+                           fFake = fakeb,
+                           fTucr = (tb,ub,cb,rb)}:declRecord))
+            end handle NotDecl => iota)
+           (findDecls gs)
+          | findDecls (_::gs) = findDecls gs
+    in  findDecls gs
+    end
+
+end
+
+fun goalDecl (decls:declsType) t =
+    let fun sb (Bind (_,_,_,r)) = sb r
+          | sb t = (case parseApp t of (Ref tb,_,_) => tb 
+                                     | _ => failwith "not a T_f type")
+        val mytb = sb t
+        fun gdecl [] = failwith "no declaration"
+          | gdecl ((d as (_,{fTucr=(tb,ub,cb,rb),...}:declRecord))::ds) =
+            if sameRef tb mytb then d else gdecl ds
+    in  gdecl decls
+    end
+
+exception NoDefn
+
+fun findDefns gs (decls:declsType) gn =
+   (let val {fName,fType,fTerm,fVv,fFake,fTucr=(tb,ub,cb,rb)} =
+            assoc gn decls
+        fun chkU (Ref b) = if sameRef ub b then () else raise NoDefn
+          | chkU _ = raise NoDefn
+        val cAl = map (fn (_,{fName,fType,fTerm,fVv,fFake,fTucr=(tb,ub,cb,rb)})
+                          => (cb,(fFake,fVv))) decls
+        val rs = map (fn (_,{fName,fType,fTerm,fVv,fFake,fTucr=(tb,ub,cb,rb)})
+                       => rb) decls
+        fun isRet b = exists (sameRef b) rs
+        fun mangle _ (App ((Ref b,baa),bvv)) =
+           (let val (fake,vv) = rassoc b cAl
+                val ((aa,_),_) = chop vv baa bvv
+                val aa = map (fn t => mangle >> t) aa
+            in  Mod (MkApp ((Ref fake,aa),vv))
+            end handle _ => 
+            if isRet b
+            then Mod (mangle >> (last baa))
+            else UMod)
+          | mangle _ _ = UMod
+        fun gdefn (qn,qT) defns =
+           (let val (QC,QT) = introall iota "x" 1 ([],qT)
+                val (f,aa,vv) = parseApp QT
+                val _ = chkU f
+                val lhs = MkApp ((Ref fFake,aa),fVv)
+                val app = MkApp ((fTerm,aa),fVv)
+                val nfa = UMnorm app
+                val noc = case parseApp nfa
+                            of (_,aa,_) => last aa
+                val (rhs,gl,av) =
+                    case parseApp noc
+                      of (Var ((n,_),_),aa,vv) => 
+                         (Var ((n,Bot),Bot),SOME n,(aa,vv))
+                       | _ => (mangle >> noc,NONE,([],[]))
+            in (gl,(qn,(QC,QT),(lhs,rhs),av))::defns
+            end handle NoDefn => defns)
+    in  foldr gdefn [] gs
+    end handle _ => raise NoDefn)
+
+fun XHrename (C,T) =
+    let val (xhRen,_,_) = vooctxtrec {
+              hitBot = fn _ => ([],1,1),
+              hitDom = fn _ => fn _ => fn _ => fn _ => ([],1,1),
+              hitVoo = fn (l,_) => fn b => fn _ => fn rect =>
+                       let val (rs,x,h) = rect ()
+                       in  if depends b T
+                           then ((l,("x",x))::rs,x+1,h)
+                           else ((l,("h",h))::rs,x,h+1)
+                       end
+            } C
+     in  vooRename xhRen (C,T)
+    end
+
+fun legoProgDisplay () =
+   (let fun thud () = failwith "not a programming problem"
+        val goals = case Namespace.getCurrentGoals ()
+                      of [Unknown gs] => gs
+                       | _ => thud ()
+        val JMb = unRef (Supply ["JM"])
+        val decls = findDecls goals
+        fun printDecl (_,{fName,fType,fTerm,fVv,fFake,fTucr=(tb,ub,cb,rb)}) =
+            let val (DC,DT) = introall iota "x" 1 ([],fType)
+                val (aa,vv) = ArgsAndVis iota DC
+                val DC = map mkBnd DC
+                val _ = map (fn t => let val _ = print "  "
+                             in  prnt_vt t (type_of_constr t)
+                             end) aa
+                val _ = print "|-\n  "
+                val _ = prnt_vt (MkApp ((Ref fFake,aa),vv)) DT
+            in  print "\n"
+            end
+        val _ = map printDecl decls
+
+        val typeAl = map (fn (_,{fTucr=(tb,ub,cb,rb),...}) => (tb,ref_VAL tb))
+                     decls
+        val tyFkAl = map (fn (_,{fFake,fTucr=(tb,ub,cb,rb),...})
+                          => (tb,Ref fFake))
+                     decls
+
+        val defns = map ((findDefns goals decls) o fst) decls
+
+        val dreds = map (CnLst o
+                         (map (fn (_,(_,(QC,_),(lhs,rhs),_))
+                               => ((map mkBnd QC);
+                                   (LabVT (RedPr,lhs,rhs))))))
+                        defns
+
+        val holes = listHoles dreds []
+
+        val _ = map (fn t => ((legoprint t);(print "\n"))) dreds
+
+        fun recAvail (S as (C,T)) i =
+           (case T
+              of Bind ((Pi,v),n,d,r) =>
+                 recAvail (vooin ("x",i) (C,Bind ((Lda,v),n,d,r))) (i+1)
+               | Bind ((Sig,_),_,d,r) =>
+                 ((recAvail (C,d) i);
+                  (if var_occur r then ()
+                   else recAvail (C,subst1closed Prop r) i))
+               | _ => (case parseApp T
+                         of (Ref tb,aa,vv) =>
+                           (let val fake = rassoc tb tyFkAl
+                            in  legoprint (tyFkAl %>> ($!S))
+                            end handle Assoc => ())
+                          | _ => ()))
+
+        val _ = if null goals then () else
+                let val (gn,gT) = hd goals
+                in  if member gn holes then let
+                    val (GC,GT) = XHrename (introall iota "z" 1 ([],gT))
+                    fun prxs [] = []
+                      | prxs (b::bs) =
+                        let val hs = prxs bs
+                        in  if (fst (bid b))="x"
+                            then ((b <! Bnd);
+                                  (print "  ");
+                                  (prnt_vt (Ref b) (ref_typ b));
+                                  hs)
+                            else b::hs
+                        end
+                    val hs = prxs GC
+                    val _ = print "|-\n  "
+                    val _ = prnt_vt (Var ((gn,Bot),Bot)) 
+                                    (UMnorm (typeAl %>> GT))
+                    val _ = if null hs then ()
+                            else ((print "Recursion patterns:\n");
+                                  (map (fn b => recAvail ([],ref_typ b) 1) hs);
+                                  ())
+                                   
+                in  () end else ()
+                end
+    in  ()
+    end handle _ => failwith "not a programming problem")
+
+
+
+fun legoProgram (name:string) (args:string list) =
+    let val _ = legoNames args
+        val (theNum,theGoal) = Synt.goaln (~9999)
+        val D = introvool ["x"] 1 (length args) ([],theGoal)
+        val (DC,DT) = progFrame D name 1
+        val _ = doEmacs (emacsAdd [name] "lego-fun-face")
+        val tac = tactic_wrapper (fn _ => let
+        val _ = claimHolesSolveGoals [theNum] (const []) (DC,DT)
+        val _ = legoProgDisplay ()
+    in  () end) in tac ()
+    end
+
+
+fun vvt v = (v,type_of_constr v)
+fun progElimTac g rv tgs S =
+    novElim [(vvt rv,[(g,map vvt tgs)])] (!unifyAfter) S
+
+fun progElim sg rv tgid S =
+    let fun thud () = failwith "not a programming problem"
+        val gnew = safeNumber S "g" 1
+        val gb = fetch S ("g",sg)
+        val qb = fetch S ("q",sg)
+        val tgg = Ref (fetch (bCT gb) tgid)
+        val tgq = Ref (fetch (bCT qb) tgid)
+        val (GQC,GQT) = on S [
+                    progElimTac ("g",1) rv [tgg],
+                    vooRename [(("sg",0),("g",gnew))],
+                    progElimTac ("q",1) rv [tgq],
+                    vooRename [(("sg",0),("oq",gnew))]
+                  ]
+        val (gs,_) = filter (hasName "g") GQC
+        fun gnobble b S =
+            let val gid as (_,k) = bid b
+                val S = on S [
+                      voodom gid,
+                      introall iota "new" 1,
+                      XHrename,
+                      domvoo gid,
+                      voodom ("oq",k),
+                      introall iota "new" 1,
+                      XHrename,
+                      domvoo ("oq",k)
+                    ]
+                val (qC,qT) = S ?! ("oq",k)
+                val (qCx,qCh) = filter (hasName "x") qC
+                val (nCx,(zap,paz)) = copyCtxt iota qCx
+                val nqb = noo (HoleBV,"q") ("q",k) (nCx,zap %>> qT)
+                val (naa,nvv) = ArgsAndVis (fn t => paz %>> t) nCx
+                val bouf = MkApp ((Ref nqb,naa),nvv)
+            in  on S [
+                  vooattack ("oq",k) ("bof",1),
+                  vooIntroTac ("bof",1),
+                  vooBeforeDom nqb,
+                  vooRefineTac ("bof",1) "oops" bouf,
+                  vookcatta ("oq",k)
+                ]
+            end
+        val S = foldr gnobble (GQC,GQT) gs
+    in  S
+    end
+
+fun getQ defns gn =
+   (let val (qn,QD,_,av) = assoc (SOME gn) defns
+    in  (qn,QD,av)
+    end handle Assoc => failwith "no equation")
+
+fun legoProgElim (rvc : cnstr_c) (name : string) =
+  ( let fun thud () = failwith "not a programming problem"
+        val goals = case Namespace.getCurrentGoals ()
+                      of [Unknown gs] => gs
+                       | _ => thud ()
+        val decls = findDecls goals
+        val JMb = unRef (Supply ["JM"])
+        val (rv,_) = fEval rvc
+        val (gn,gT) = hd goals
+        val (GC,GT) = XHrename (introall iota "z" 1 ([],gT))
+        val decl = goalDecl decls GT
+        val defns = findDefns goals decls (fst decl)
+        val (qn,(QC,QT),_) = getQ defns gn
+        fun getTg [] = thud ()
+          | getTg (b::bs) = if (ref_nam b)=name then bid b
+                            else getTg bs
+        val tg = getTg GC
+        val ngb = noo (HoleBV,"bof") ("g",1) (GC,GT)
+        val grb = noo ((Let,Def),"lego") ("lego",gn) ([],Ref ngb)
+        val nqb = noo (HoleBV,"paf") ("q",1) (QC,sub [(gn,Ref ngb)] QT)
+        val qrb = noo ((Let,Def),"lego'") ("lego",qn) ([],Ref nqb)
+        val S = on ([qrb,nqb,grb,ngb],Prop) [
+                   progElim 1 rv tg
+                ]
+        fun nexts [] = []
+          | nexts ((i,_,("g",_))::gs) = i::(nexts gs)
+          | nexts (_::gs) = nexts gs
+        val tac = tactic_wrapper (fn _ => let
+        val _ = claimHolesSolveGoals [] nexts S
+    in  legoProgDisplay () end)
+    in  tac ()
+    end handle _ => failwith "bad Program Elim" )
+
+fun legoProgNames (names : string list) =
+    let fun thud () = failwith "not a programming problem"
+        val goals = case Namespace.getCurrentGoals ()
+                      of [Unknown gs] => gs
+                       | _ => thud ()
+        val decls = findDecls goals
+
+        val tyFkAl = map
+                     (fn (_,{fName,fType,fTerm,fVv,fFake,fTucr=(tb,ub,cb,rb)})
+                      => (tb,Ref fFake))
+                     decls
+
+        val (gn,gT) = hd goals
+        val (GC,GT) = XHrename (introall iota "z" 1 ([],gT))
+        val decl = goalDecl decls GT
+        val defns = findDefns goals decls (fst decl)
+        val (qn,(QC,QT),_) = getQ defns gn
+        val (GCx,_) = filter (hasName "x") GC
+        fun blat (x::xs) (y::ys) =
+           (case blat xs ys
+              of [] => []
+               | ("_"::ns) => ns
+               | (n::ns) =>
+                 let val _ = x <: (case ref_bd x
+                                     of (bv,_,d,r) => (bv,n,d,r))
+                     val _ = y <: (case ref_bd y
+                                     of (bv,_,d,r) => (bv,n,d,r))
+                 in  ns
+                 end)
+          | blat _ _ = names
+        val _ = blat GCx QC
+        val G' = unEval ($!(GC,GT))
+        val Q' = unEval ($!(QC,QT))
+        val _ = Toplevel.Next qn
+        val _ = Top.Equiv Q'
+        val _ = Toplevel.Next gn
+        val _ = Top.Equiv G'
+    in  legoProgDisplay ()
+    end
+
+fun tack x xs = xs@[x]
+
+fun recHoles aliases nom tm =
+    let fun recBlat i (D as (C,Bind ((bop,v),nom,dom,ran))) =
+            let val D2 = on D [
+                           vooin ("x",i),
+                           voodom ("x",i)
+                         ]
+                val (D3,hsd,i') = recBlat i D2
+                val ((C,T),hsr,i'') = recBlat i' (domvoo ("x",i) D3)
+                val lb = hd C
+                val oC = tl C
+                val lb = case bop of Lda => pify lb
+                                   | Pi  => lb
+                                   | Sig => pify lb
+                                   | _ => failwith "too stupid"
+                val hsar = map (fn b =>
+                                noo (HoleBV,"rec") (bid b)
+                                    (vooCopy (((tack lb)**iota) (bCT b))))
+                           hsr
+                val lb = case bop of Lda => ldify lb
+                                   | Pi  => lb
+                                   | Sig => sigify lb
+                                   | _ => failwith "too stupid"
+                val pv = prVis v
+                val hsr' = map (fn b => App ((Ref b,[Ref lb]),[pv])) hsar
+                val al = ListUtil.zip (hsr,hsr')
+                val T = al %>> T
+                val (hsar,_) = al %>>> (hsar,Prop)
+            in  ((oC,$!([lb],T)),hsar@hsd,i'')
+            end
+          | recBlat i (C,T) = (case parseApp T of (f,aa,vv) =>
+            let val (aa',hsaa,i') = recBlats i C aa
+            in  case f
+                  of Ref x => 
+                    (let val ((tb,ub,cb,rb),tvv) = rassoc x aliases
+                         val ((raa,rvv),(saa,svv)) = chop tvv aa' vv
+                         val hb = noo (HoleBV,nom) (nom,i')
+                                      ([],MkApp ((Ref tb,raa),tvv))
+                         val tm = MkApp ((Ref cb,raa@[Ref hb]@saa),
+                                  (map (const NoShow) raa)@[ShowNorm]@svv)
+                     in ((C,tm),[hb],i'+1)
+                     end handle _ => ((C,MkApp ((f,aa'),vv)),hsaa,i'))
+                   | _ => ((C,MkApp ((f,aa'),vv)),hsaa,i')
+            end )
+        and recBlats i C [] = ([],[],i)
+          | recBlats i C (a::aa) =
+            let val ((_,a'),hsa,i') = recBlat i (C,a)
+                val (aa',hsaa,i'') = recBlats i' C aa
+            in (a'::aa',hsa@hsaa,i'')
+            end
+        val ((_,tm'),hs,_) = recBlat 1 ([],tm)
+    in (tm',hs)
+    end
+
+
+fun progRefine sg aliases rhs S =
+    let fun thud () = failwith "not a programming problem"
+        val len = (length o fst) (S ?! sg)
+        val S = on S [vooattack sg ("bof",1),
+                      vooIntroTac ("bof",1)]
+        val (Tf,Taa,Tvv) = parseApp (ref_typ (hd (fst S)))
+        val Tb = unRef Tf
+        val (Cb,Rb,Ub) = case map (fn s => #1 (fEval (Ref_c s))) (ref_deps Tb)
+                           of [Ref Cb,Ref Rb,Ref Ub] => (Cb,Rb,Ub)
+                            | _ => thud ()
+        val (T',hs) = recHoles aliases "rec" rhs
+        val sol = MkApp ((Ref Rb,Taa@[T']),(map (const NoShow) Tvv)@[ShowNorm])
+        val S = on S [
+                   ("bof",1)\(hs,sol),
+                   genPrologSubHoles reflGuesser len hs,
+                   prologRetreat sg
+                ]
+    in  S
+    end
+
+fun legoProgRefine (rhs : cnstr_c) =
+    let fun thud () = failwith "not a programming problem"
+        val goals = case Namespace.getCurrentGoals ()
+                      of [Unknown gs] => gs
+                       | _ => thud ()
+        val decls = findDecls goals
+        val aliases = map (fn (_,{fFake,fVv,fTucr,...}) => (fFake,(fTucr,fVv)))
+                      decls
+        val fakes = map fst aliases
+        val (gn,gT) = hd goals
+        val (GC,GT) = introall iota "x" 1 (start gT)
+        val ngb = noo (HoleBV,"bof") ("g",1) (GC,GT)
+        val (Vrhs,Trhs) = fEvalCxt (fakes@GC) rhs
+        val S = on ([ngb],App ((Bot,[Ref ngb]),[ShowNorm])) [
+              progRefine ("g",1) aliases Vrhs
+            ]
+        val _ = claimHolesSolveGoals [gn] (const []) S
+    in  legoProgDisplay ()
+    end
+
+val myUnEval =
+  let
+    fun psh_nam n nams =
+      if n="" orelse (Namespace.isNewName n andalso not (mem n nams))
+	then (n,n::nams)
+      else psh_nam (n^"'"^(makestring ((length nams)+1))) nams
+    fun uerec nams =
+     (fn Prop            => Prop_c
+       | Theory          => Theory_c
+       | Type(n)         => (case n
+			       of Uconst(m) => TypeAbs_c(m)
+				| Uvar(Unnamed _,_) => Type_c ""
+				| Uvar(Named s,_) => Type_c s )
+       | Ref(br)         => Ref_c(ref_nam br)
+       | Rel(n)          => Ref_c(nth nams n handle Nth _ => bug"uerec")
+       | App((f,args),viss) => 
+	   let fun app f (arg,vis) = App_c(vis,f,uerec nams arg)
+	   in  foldl app (uerec nams f) (ListUtil.zip (args,viss))
+	   end
+       | LabVT(l,v,t) =>
+	   (case l of
+	      Name _ => bug"unEval:LabVT Name"
+	    | WeakCast => wCast_c(uerec nams v,t)
+	    | StrongCast => Cast_c(uerec nams v,uerec nams t)
+	    | RedPr => bug"unEval:LabVT RedPr")
+       | CnLst rr => Red_c ([],map (ured nams) rr)
+       | Case _ => bug"uerec:Case"
+       | Bind((Thry,v),n,c,d) => bug"uerec:Thry"
+       | Bind((b,v),n,c,d) =>
+	   let val (n,nams') = psh_nam n nams
+	   in  Bind_c((b,v,(UnFroz,Local),[],[n],uerec nams c),uerec nams' d)
+	   end
+       | Tuple(T,ls)     => Tuple_c(map (uerec nams) ls,uerec nams T)
+       | Proj(p,c)       => Proj_c(p,uerec nams c)
+       | RedTyp(p,c)     => RedTyp_c(p,uerec nams c)
+       | Var((n,_),c)        => Cast_c(Var_c n,uerec nams c)
+       | Bot             => bug"uerec:Bot")
+    and ured nams (LabVT (RedPr,l,r)) = (uerec nams l,uerec nams r)
+      | ured _ _ = bug"ured"
+  in
+    uerec []
+  end
+
+fun legoProgSave () =
+    let fun thud () = failwith "not a programming problem"
+        val goals = case Namespace.getCurrentGoals ()
+                      of [Unknown gs] => gs
+                       | _ => thud ()
+        val decls = findDecls goals
+        val defns = map ((findDefns goals decls) o fst) decls
+        val _ = (map o map)
+                (fn (_,(_,(QC,_),(lhs,rhs),_))
+                  => (case listHole rhs [] of [] => ()
+                         | _ => failwith "Finish it first!"))
+
+        fun merge [] = ([],[])
+          | merge ((_,(_,(QC,_),(lhs,rhs),_))::clrs) =
+            let val (BC,reds) = merge clrs
+                fun splat b (C',al) =
+                    let val b = hd (fst (al %>>> ([b],Prop)))
+                        exception Seek
+                        fun seek [] = raise Seek
+                          | seek (b'::bs) =
+                            if (ref_nam b) = (ref_nam b') andalso
+                               par_tm (ref_typ b) (ref_typ b')
+                            then (b,Ref b')
+                            else seek bs
+                    in  (C',(seek BC)::al)
+                        handle Seek => ((ldify b)::C',al)
+                    end
+                val (BC,al) = foldr splat (BC,[]) QC
+            in (BC,(LabVT (RedPr,al %>> lhs,al %>> rhs))::reds)
+            end
+
+        val reds = map merge defns
+
+        fun thaw (_,{fTucr=(tb,ub,cb,rb),...}:declRecord) =
+            Namespace.Unfreeze [ref_nam tb,ref_nam ub,ref_nam cb,ref_nam rb]
+        
+        val JMr = unEval (Supply ["JM","refl"])
+        val Void = unEval (Supply ["any","inhabited","type","term"])
+
+        fun doDecRefl (gn,_) =
+            let val _ = Toplevel.Intros gn false ["#"]
+                val (g',_) = Synt.goal_rel (false,1)
+                val _ = Toplevel.Refine g' 0 JMr
+            in  ()
+            end
+
+        fun doQVoid (gn,_) =
+            let val _ = Toplevel.Intros gn false []
+                val (g',_) = Synt.goal_rel (false,0)
+                val _ = Toplevel.Refine g' 0 Void
+            in  ()
+            end
+
+        val _ = map thaw decls
+
+        val terms = map
+                      (fn (_,{fFake,fTerm,...}) => (fFake,UMnorm fTerm))
+                    decls
+
+        val _ = map doDecRefl decls
+        val rest = case Namespace.getCurrentGoals ()
+                     of [Unknown gs] => gs
+                      | _ => thud ()
+        val _ = map doQVoid rest
+    in  if Namespace.provenState ()
+        then
+    let fun makeConc (b,tm) = (Let,Def,(Froz,Global),[],[ref_nam b],unEval tm)
+        val Cxt = map makeConc terms
+        val _ = Top.EvalCxt Cxt
+        fun rejig f (Bind_c (b,r)) = rejig (f o (cons b)) r
+          | rejig f (Red_c (c,rs)) = Red_c (f c,rs)
+          | rejig _ x = x
+        fun makeRed (C,Rs) = rejig iota (myUnEval ($!(C,CnLst Rs)))
+        val _ = map (Top.EvalRed o makeRed) reds
+    in  ()
+    end
+        else failwith "Not Done Yet!"
+    end
+
+
+fun legoProgAbst (abs_c : cnstr_c) =
+   (let fun thud () = failwith "gang aft agley"
+        val JM = Supply ["JM"]
+        val jmvv = [NoShow,NoShow,ShowNorm,ShowNorm]
+        fun slit (Ref_c name) aa vv = (name,aa,vv)
+          | slit (App_c (v,f,a)) aa vv = slit f (a::aa) (v::vv)
+          | slit _ _ _ = failwith "no idea what you're on about"
+        val (name,aa_c,vv_p) = slit abs_c [] []
+
+        val goals = case Namespace.getCurrentGoals ()
+                      of [Unknown gs] => gs
+                       | _ => thud ()
+
+        val decls = findDecls goals
+        val typeAl = map (fn (_,{fTucr=(tb,ub,cb,rb),...}) => (tb,ref_VAL tb))
+                     decls
+        val aliases = map (fn (_,{fFake,fVv,fTucr,...}) => (fFake,(fTucr,fVv)))
+                      decls
+        val fakes = map fst aliases
+
+        val (gn,gT) = hd goals
+        val (GC,GT) = XHrename (introall iota "z" 1 ([],gT))
+        val (SPGC,(spzap,_)) = copyCtxt iota GC
+        val decl = goalDecl decls GT
+        val defns = findDefns goals decls (fst decl)
+        val (qn,(QC,QT),(qaa,qvv)) = getQ defns gn
+
+        val (Tf,Taa,Tvv) = parseApp GT
+        val Tb = unRef Tf
+        val (Cb,Rb,Ub) = case map (fn s => #1 (fEval (Ref_c s))) (ref_deps Tb)
+                           of [Ref Cb,Ref Rb,Ref Ub] => (Cb,Rb,Ub)
+                            | _ => thud ()
+
+        val ngb = noo (HoleBV,"g") ("g",1) (SPGC,spzap %>>GT)
+
+        val gsub = [(gn,Ref ngb)]
+        val EVC = fakes @ GC @ (fst (start Prop))
+        val T = varFix (UMnorm (typeAl %>> GT))
+
+        val (args,argtys) = ListUtil.unzip (map (fEvalCxt EVC) aa_c)
+
+        val QT = sub gsub QT
+        val qaa = map (sub gsub) qaa
+
+        fun mkren qs (g::gs) =
+           (case (qs,bid g)
+              of (q::qs,("x",i)) => if (snd (bid q))=i
+                                    then (q,Ref g)::(mkren qs gs)
+                                    else failwith "out of synch"
+               | _ => mkren qs gs)
+          | mkren _ _ = []
+        val q2g = mkren QC GC
+        val qaa' = map (fn t => q2g %>> t) qaa
+        val (gbb,_) = ArgsAndVis unRef GC
+        val gal = ListUtil.zip (gbb,qaa')
+
+        val (GCx,GCh) = filter (hasName "x") GC
+
+        fun mkNX (a::aa) (m::mm) (v::vv) (OX,T) OHh NX (gaa,gvv) i =
+            let val (OXB,OXA) = vooDepCut OX [type_of_constr a]
+                val (_,OXA) = vooDepCut OXA [a]
+                val (NXB,(zap,_)) = copyCtxt hide OXB
+                val OXT' = zap %>>> (OXA,T)
+                val (baa,_) = ArgsAndVis iota OXB
+                val bvv = map (const NoShow) baa
+                val v' = case v of ShowNorm => Vis | _ => Hid
+                val (nam,a) = case a
+                                of Ref b => (ref_nam b,a)
+                                 | Bind ((Let,Def),n,v,Rel 1) => (n,v)
+                                 | _ => ("abst",a)
+                val npb = noo ((Pi,v'),nam) ("a",i)
+                              ([],zap %>> (type_of_constr m))
+                fun mangle j t = (case par_unif [] t m
+                                    of SOME [] => Mod (Ref npb)
+                                     | _ => UMod)
+                val OHh' = mangle >>> (zap %>>> OHh)
+                val mm' = map (fn t => mangle >> (zap %>> t)) mm
+            in  mkNX aa mm' vv (mangle >>> OXT') OHh' (npb::(NXB@NX))
+                     (gaa@baa@[a],gvv@bvv@[v]) (i+1)
+            end
+          | mkNX _ _ _ (OX,T) OHh NX gav i = ((NX,T),OHh,gav)
+
+        val ((NX,T),(OHu,hs),(gaa,gvv)) =
+            mkNX args args vv_p (GCx,T)
+                (GCh,MkApp ((Var ((gn,Bot),gT),qaa'),qvv)) [] ([],[]) 1
+
+        val _ = if dependsList GCx T then failwith "not enough data"
+                                     else ()
+
+        val (OHk,_) = vooNonDepCut OHu GCx
+
+        val (haa,hvv) = ArgsAndVis iota OHk
+
+        val (nha,nhv) = case parseApp hs
+                          of (_,aa,_) =>
+                             let val hal = ListUtil.zip (gbb,aa)
+                             in  ArgsAndVis (fn t => hal %>> t) OHk
+                             end
+
+        fun mkRen [] = ([],1)
+          | mkRen (b::bs) =
+            let val (ren,i) = mkRen bs
+            in ((bid b,("x",i))::ren,i+1)
+            end
+        val (NX,T) = vooRename (fst (mkRen NX)) (NX,T)
+
+        val (retb,callb,unitFb,typeFb) = makeProgDefs (NX,T) name 2
+
+        val mainb =
+              let val (PNX,(pzap,_)) = copyCtxt iota NX
+              in  noo ((Sig,Vis),name) ("f",2)
+                      (PNX,pzap %>> T)
+              end
+
+        val goalb =
+              let val (PNX,(pzap,_)) = copyCtxt iota NX
+                  val (paa,pvv) = ArgsAndVis iota PNX
+                  val (PNH,_) = copyCtxt iota OHk
+                  val (PNH,_) = pzap %>>> (PNH,Prop)
+              in  noo (HoleBV,name) ("g",2)
+                      (PNH@PNX,MkApp ((Ref typeFb,paa),pvv))
+              end
+
+        val clueb =
+              let val (LNX,(lzap,_)) = copyCtxt ldify NX
+                  val (laa,lvv) = ArgsAndVis iota LNX
+                  val lhh = map (fn t => lzap %>> t) nha
+                  val typ = ref_typ mainb
+                  val bof = MkApp ((Ref goalb,laa@lhh),lvv@nhv)
+                  val paf = MkApp ((Ref callb,laa@[bof]),
+                                   (map (const NoShow) lvv)@[ShowNorm])
+                  val rhs = $!(LNX,paf)
+                  val q = MkApp ((JM,[typ,typ,Ref mainb,rhs]),jmvv)
+              in  noo (HoleBV,"clue") ("clue",2) ([mainb],q)
+              end
+
+        val unitb =
+              let val (PNX,(pzap,_)) = copyCtxt iota NX
+                  val (paa,pvv) = ArgsAndVis iota PNX
+              in  noo (HoleBV,"q") ("q",2)
+                      (PNX,MkApp ((Ref unitFb,paa),pvv))
+              end
+
+        val bokko = spzap %>>
+                   (MkApp ((Ref callb,
+                            gaa@[MkApp ((Ref goalb,gaa@haa),gvv@hvv)]),
+                            (map (const NoShow) gvv)@[ShowNorm]))
+
+        val solb = noo ((Let,Def),"lego") ("lego",gn) ([],Ref ngb)
+
+        val S = on ([unitb,clueb,solb,ngb,goalb,retb,callb,unitFb,typeFb],Prop)
+                [progRefine ("g",1) aliases bokko]
+
+        fun nexts [] = []
+          | nexts ((i,_,("g",_))::gs) = i::(nexts gs)
+          | nexts (_::gs) = nexts gs
+
+        val _ = doEmacs (emacsAdd [name] "lego-fun-face")
+
+        val tac = tactic_wrapper (fn _ => let
+        val _ = claimHolesSolveGoals [] nexts S
+    in  legoProgDisplay () end)
+    in  tac ()
+    end handle _ => failwith "bad Program Abst" )
+
+(*
+val _ = ConorTools.Program := legoProgram
+val _ = ConorTools.ProgElim := legoProgElim
+val _ = ConorTools.ProgNames := legoProgNames
+val _ = ConorTools.ProgRefine := legoProgRefine
+val _ = ConorTools.ProgSave := legoProgSave
+val _ = ConorTools.ProgDisplay := legoProgDisplay
+val _ = ConorTools.ProgAbst := legoProgAbst
+*)

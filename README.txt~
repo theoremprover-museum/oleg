@@ -1,0 +1,10 @@
+This directory contains the current version of OLEG, specifically
+
+  src            the SML/NJ 0.93 source code
+  bin            linux binaries compiled from the above
+  examples       some demo scripts
+  papers         related old drafts of papers now changed beyond recognition
+                   (and generally for the better)
+  oleg-emacs.el  
+  
+

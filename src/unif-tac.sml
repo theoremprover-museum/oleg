@@ -1,0 +1,115 @@
+
+
+fun unifyRule (C,T) (lv,lt) (rv,rt) =
+    if par_tm lt rt
+    then
+    let val wlv = whnf lv
+        val wrv = whnf rv
+        fun tryK l r = if par_tm wlv wrv then Supply ["JM","K"]
+                       else raise quartermaster
+        fun tryJsym (Ref b) t =
+            if isLocal C b andalso (not (depends b t))
+            then Supply ["JM","Jsym"]
+            else raise quartermaster
+          | tryJsym _ _ = raise quartermaster
+        fun tryJ t (Ref b) =
+            if isLocal C b andalso (not (depends b t))
+            then Supply ["JM","J"]
+            else raise quartermaster
+          | tryJ _ _ = raise quartermaster
+        fun tryNoConf l r =
+           (case (parseApp l,parseApp r)
+              of ((Ref lb,_,_),(Ref rb,_,_)) =>
+                 if is_constructor lb andalso is_constructor rb
+                 then Supply [ref_nam (headRef (ref_typ lb)),"noConf"]
+                 else raise quartermaster
+               | _ => raise quartermaster)
+        fun tryem [] = raise quartermaster
+          | tryem (f::fs) = (f wlv wrv
+                             handle _ => tryem fs)
+    in  tryem [tryK,tryJ,tryJsym,tryNoConf]
+    end
+    else raise quartermaster
+
+
+fun legoUnifyRule [Ref_c "unify",lhs,rhs] =
+    let val (C,T) = if activeProofState()
+                    then let val (_,gT) = Synt.goaln (~9999)
+                             val S = introall iota "x" 1 (start gT)
+                         in  S
+                         end
+                    else (start Prop)
+    in  (unEval (unifyRule (C,T) (fEvalCxt C lhs) (fEvalCxt C rhs)),false)
+    end
+  | legoUnifyRule _ = raise quartermaster
+
+val _ = Register legoUnifyRule
+
+fun oneUnifyTac g S =
+    let val j = safeNumber S "biff" 1
+        val S = on S [
+                  voodom g,
+                  introall iota "biff" j,
+                  domvoo g
+                ]
+        val (GC,GT) = S ?! g
+        val JMb = unRef (Supply ["JM"])
+        fun isQ b = (case parseApp (whnf (ref_typ b))
+                       of (Ref b',_,_) => sameRef b' JMb
+                        | _ => false)
+        val (GCQ,_) = filter isQ GC
+        fun try [] S = (S,false)
+          | try (q::qs) S =
+           (case try qs S
+              of (S,true) => (S,true)
+               | (S,false) =>
+            let val (lvt,rvt) = case (parseApp (whnf (ref_typ q)))
+                                  of (_,[lt,rt,lv,rv],_) => ((lv,lt),(rv,rt))
+                                   | _ => failwith "bad equation"
+                val rule = unifyRule (GC,GT) lvt rvt
+                val S = octElim g rule [Ref q] S
+            in  (S,true)
+            end handle _ => (S,false))
+    in  try GCQ S
+    end
+
+fun findAHole (C,_) = Cfoldr (fn b => fn sid =>
+                              if holy b then SOME (bid b)
+                              else if (ref_bind b)=Lda then sid else NONE)
+                             NONE C
+
+fun unifyTac g S =
+    let fun repUnify S =
+           (case findAHole S
+              of SOME id =>
+                (case oneUnifyTac id S
+                   of (S,true) => repUnify S
+                    | (S,false) => S)
+               | _ => S)
+        fun tidy (S as (b::C,T)) =
+           (case findAHole S
+              of SOME id => vooRename [(id,g)] S
+               | _ => S)
+          | tidy S = S
+
+        val S = on S [
+                  vooattack g ("bof",1),
+                  repUnify,
+                  tidy,
+                  prologRetreat g
+                ]
+    in  S
+    end
+
+fun legoUnifyTac () =
+    let val (gn,gT) = Synt.goaln (~9999)
+        val (GC,GT) = introall iota "x" 1 ([],gT)
+        val ngb = noo (HoleBV,"goal") ("goal",1) (GC,GT)
+        val nlb = noo ((Let,Def),"lego") ("lego",gn) ([],Ref ngb)
+        val S = on ([nlb,ngb],Prop) [
+                  unifyTac ("goal",1)
+                ]
+    in  claimHolesSolveGoals [] (map (fn (i,_,_) => i)) S
+    end
+
+val _ = unifyAfter := vooSubSequence "sg" (unifyTac o (pair "sg"))

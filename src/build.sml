@@ -1,0 +1,181 @@
+(*
+   $Log: build.sml,v $
+   Revision 1.14  1997/11/24 10:57:58  tms
+   merged immed-may-fail with main branch
+
+   Revision 1.12.2.4  1997/11/18 16:36:19  tms
+   removed support for heterogenous vectors
+
+   Revision 1.12.2.3  1997/10/13 16:46:56  djs
+   More problems with the above.
+
+   Revision 1.12.2.2  1997/10/13 16:21:20  djs
+   Because CVS charmingly breaks code by inserting the wrong comment
+   markers.
+  
+   Revision 1.12.2.1  1997/10/10 17:02:08  djs
+   Made everything work on Solaris, by taking out some nested comments.
+  
+   Revision 1.12  1997/05/08 13:42:12  tms
+   added support for adding tactics
+  
+   Revision 1.11  1997/03/06 17:35:58  djs
+   Added some stuff to build.sml so we could configure cml-ness from th
+   environment.
+  
+   Revision 1.10  1997/03/06 15:59:16  tms
+   added basic support for Point-and-Rewrite
+  
+   Revision 1.9  1997/03/06 09:51:24  tms
+   *** empty log message ***
+*)
+
+val qwertyuiop = System.Timer.start_timer();
+
+(* To get cml support without the -cml command switch, set the CMLLIB 
+   environment variable - for LFCS it's /usr/local/share/njml/cml.
+   Under Linux you also need the SRCDIR variable, since getWD doesn't work.
+
+   This is all a horrible hack to deal with various possible cml configs
+*)
+(*
+val cmldir =  
+let fun check [] = "none"
+  | check (h::t) =  if (substring(h,0,7) = "CMLLIB=" handle Substring => false)
+                    then substring(h,7,size h - 7) else check t
+in check (System.environ())
+end
+
+val srcdir =  
+let fun check [] = System.Directory.getWD ()
+  | check (h::t) =  if (substring(h,0,7) = "SRCDIR=" handle Substring => false)
+                    then substring(h,7,size h - 7) else check t
+in check (System.environ())
+end;
+
+if cmldir = "none" then () else (System.Directory.cd cmldir;use "load-cml");
+if cmldir = "none" then () else (loadCML(); System.Directory.cd srcdir);
+(**)
+val NJMLLIB =
+  let 
+  fun check [] = "/usr/local/share/njml/smlnj-lib"
+    | check (h::t) =
+      if (substring(h,0,8) = "NJMLLIB=" handle Substring => false)
+      then substring(h,8,size h - 8) else check t
+  in check (System.environ())
+  end
+;
+
+print ("Using New Jersey Library from "^NJMLLIB^"\n");
+
+val NJMLLIB=NJMLLIB^"/";
+
+
+
+(* it would be better to use the SourceGroup module *)
+use (NJMLLIB^"lib-base-sig.sml");
+use (NJMLLIB^"lib-base.sml");
+use (NJMLLIB^"pathname-sig.sml");
+use (NJMLLIB^"pathname.sml");
+use (NJMLLIB^"charset-sig.sml");
+use (NJMLLIB^"charset.sml");
+use (NJMLLIB^"ctype-sig.sml");
+use (NJMLLIB^"ctype.sml");
+use (NJMLLIB^"string-util-sig.sml");
+use (NJMLLIB^"string-util.sml");
+use (NJMLLIB^"list-util-sig.sml");
+use (NJMLLIB^"list-util.sml");
+use (NJMLLIB^"list-format-sig.sml");
+use (NJMLLIB^"list-format.sml");
+use (NJMLLIB^"makestring-sig.sml");
+use (NJMLLIB^"makestring.sml");
+use (NJMLLIB^"string-cvt-sig.sml");
+use (NJMLLIB^"string-cvt.sml");
+
+*)
+
+use "PRETTY.sml";
+use "Pretty.sml";
+use "utils.sml";
+use "emacs-fonts.sml";
+use "universe.sml";
+use "term.sml";
+use "error-sig.sml";
+use "type-sig.sml";
+use "infix.sml";
+use "shar_pretty.sml";
+use "subst.sml";
+use "esUMopen.sml";
+use "toc.sml";
+use "type.sml";
+use "unif.sml";
+use "cml.sml";
+use "namespace-sig.sml";
+use "machine-sig.sml";
+use "machine.sml";
+use "concrete-sig.sml";
+use "concrete.sml";
+use "qmaster-sig.sml";
+use "qmaster.sml";
+use "ind_relations-sig.sml";
+use "ind_relations.sml";
+use "relation-sig.sml";
+use "nind_rel.sml";
+use "double-sig.sml";
+use "newextra_ind.sml";
+use "record-sig.sml";
+use "record.sml";
+use "synt-sig.sml";
+use "synt.sml";
+use "conor-knots.sml";
+use "conor-then.sml";
+
+(* a packet of sigs *)
+use "tacticals-sig.sml";
+use "toplevel-sig.sml";
+use "discharge-sig.sml";
+use "modules-sig.sml";
+use "newtop-sig.sml";
+use "tactics-sig.sml";
+use "init-sig.sml";
+
+use "tacticals.sml";
+use "toplevel.sml";
+use "discharge.sml";
+use "modules.sml";
+use "conor-require.sml";
+use "namespace.sml";
+use "newtop.sml";
+use "tactics.sml";
+use "logic.sml";
+use "help.sml";
+use "init.sml";
+use "error.sml";
+use "pbp.sml";
+use "linkOpen.sml";   (* incorporating conor-build.sml *)
+use "conor-fixApp.sml"; (* this will go further up when I tidy it *)
+
+use "interface.sml";
+
+(* debugging help *)
+fun show nam =
+  case (Namespace.search nam (Namespace.getNamespace()))
+    of ref (Bd{bd=(_,_,c,_),...}) => c;
+Init.Init_raw "XCC";
+Pbp.pbp_initialize();
+
+use "genCore.sml";
+
+(* Ideally, support for Proof-by-Pointing is added dynamically
+   by the User Interface *)
+use "pbp_lib_logic.sml";
+use "pbp_lib_eq_basics.sml";
+
+use "lib_nat_plus_thms.sml";
+
+message("\ncompile: "^(makestring_timer qwertyuiop));
+
+(***
+Profile.reset();
+***)
+

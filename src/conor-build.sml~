@@ -1,0 +1,75 @@
+open Namespace
+open Quartermaster
+open ConorRequire
+open StringCvt
+;
+
+use "conor-utils.sml";
+use "voodoo.sml";
+use "nov-tools.sml";
+use "prolog.sml";
+use "elim.sml";
+use "nov-elim.sml";
+use "prog.sml";
+use "eq-thms.sml";
+use "ind-thms.sml";
+use "kjunify.sml";
+use "nat-thms.sml";
+use "rec-tacs.sml";
+use "wave.sml";
+use "case-red.sml";
+
+signature CONORTOOLS =
+sig
+  val KJunify : (unit -> unit) ref
+  val Clobber : (string -> int -> cnstr -> unit) ref
+  val Elim : (string -> int -> cnstr -> unit) ref
+  val Induction : (string -> string -> int -> unit) ref
+  val Cases : (string -> string -> int -> unit) ref
+  val Invert : ((cnstr*cnstr) -> unit) ref
+  val KJunifyStep : (unit -> unit) ref
+  val Eduardo : (string list -> unit) ref
+  val Dale : (unit -> unit) ref
+  val SaveReductions : (string list -> unit) ref
+  val Wave : (int -> bool -> cnstr_c -> unit) ref
+  val Names : (string list -> unit) ref
+  val OctElim : (cnstr_c -> unit) ref
+  val NovElim : ((cnstr_c * ((int * (cnstr_c list)) list)) list -> unit) ref
+  val Abstract : (string -> string -> cnstr_c -> unit) ref
+  val Delete : (string -> unit) ref
+  val Program : (string -> string list -> unit) ref
+  val ProgElim : (cnstr_c -> string -> unit) ref
+  val ProgNames : (string list -> unit) ref
+  val ProgRefine : (cnstr_c -> unit) ref
+  val ProgSave : (unit -> unit) ref
+  val ProgDisplay : (unit -> unit) ref
+  val ProgAbst : (cnstr_c -> unit) ref
+end
+
+structure ConorTools : CONORTOOLS =
+struct
+  val KJunify = ref LegoKJunify
+  val Clobber = ref LegoElim
+  val Elim = ref LegoElimKJunify
+  val Induction = ref LegoInduction
+  val Cases = ref LegoCases
+  val Invert = ref LegoInvert
+  val KJunifyStep = ref LegoKJunify1
+  val Eduardo = ref legoEduardo
+  val Dale = ref legoDale
+  val SaveReductions = ref legoSaveReductions
+  val Wave = ref legoWave
+  val Names = ref legoNames
+  val OctElim = ref legoOctElim
+  val NovElim = ref legoNovElim
+  val Abstract = ref legoAbstract
+  val Delete = ref legoDelete
+  val Program = ref legoProgram
+  val ProgElim = ref legoProgElim
+  val ProgNames = ref legoProgNames
+  val ProgRefine = ref legoProgRefine
+  val ProgSave = ref legoProgSave
+  val ProgDisplay = ref legoProgDisplay
+  val ProgAbst = ref legoProgAbst
+end
+
